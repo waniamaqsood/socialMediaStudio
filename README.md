@@ -1,94 +1,174 @@
-# Phase 1 — System Design
+# Social Media Studio
 
-## 1. Overview
+A backend content repurposing and publishing system built with **FastAPI, SQLite, and Ollama**.
 
-The system is a content repurposing and publishing backend that takes an original piece of content, generates platform-specific variants using an LLM, allows those variants to move through an approval workflow, and eventually supports scheduling and publishing through platform adapters.
+The system accepts source content as a URL or Markdown, stores the original post, generates platform-specific variants using `llama3.2:latest`, supports review and approval, schedules approved variants, publishes them through platform adapters, and records every publishing attempt in persistent history.
 
-The design prioritizes a clear separation between the original content, generated variants, approval state, scheduling, and publishing history. This allows the system to evolve from a simple content-generation API into a more complete publishing workflow without coupling these responsibilities together.
+## Features
 
-### Core technology decisions
-
-* **Backend:** Python + FastAPI
-* **Database:** SQLite
-* **LLM:** Gemini
-* **Publishing architecture:** Platform adapters
-* **Real adapter:** Discord
-* **Mock adapters:** MockX and MockLinkedIn
-* **Initial generated platforms:** LinkedIn and Instagram
-* **Input formats:** URL or Markdown
-
----
-
-## 2. High-Level Workflow
-
-The proposed workflow is:
-
-**Content Input → Store Original Post → Generate Variants → Review → Approve/Reject → Schedule → Publish → Record History**
-
-The original post remains the **single source of truth**. Generated platform-specific content is stored separately as variants rather than modifying the original post.
-
-A variant initially has the status `draft`.
-
-The review lifecycle is:
-
-**draft → approved → published**
-
-or:
-
-**draft → rejected**
-
-Scheduling is treated as a separate concern from approval. A variant can therefore be approved without immediately being published.
-
-Once a variant has been approved, its content cannot be edited. This preserves the integrity of the content that was reviewed and approved.
+* URL and Markdown content ingestion
+* Persistent source-post storage in SQLite
+* AI-powered LinkedIn and Instagram variant generation
+* Ollama with `llama3.2:latest`
+* Platform-specific content constraints
+* Draft / approved / rejected / published workflow
+* Approved-content scheduling
+* Durable scheduler job store
+* Restart recovery for interrupted scheduler jobs
+* Idempotent publishing
+* Discord real publishing adapter
+* Mock LinkedIn and Mock X adapters
+* Persistent publish history
+* Environment-based secret configuration
+* Automated pytest coverage
 
 ---
 
-## 3. Input Design
-
-The system accepts two types of source input:
+## Architecture
 
 ```text
-source_type = "url" | "markdown"
+                         ┌──────────────────┐
+                         │   Source Input   │
+                         │ URL / Markdown   │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │   Post Storage   │
+                         │     SQLite       │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │    Generator     │
+                         │ Ollama / Llama   │
+                         │   3.2:latest     │
+                         └────────┬─────────┘
+                                  │
+                       ┌──────────┴──────────┐
+                       ▼                     ▼
+                ┌─────────────┐       ┌─────────────┐
+                │  LinkedIn   │       │ Instagram   │
+                │   Variant   │       │   Variant   │
+                └──────┬──────┘       └──────┬──────┘
+                       │                     │
+                       └──────────┬──────────┘
+                                  ▼
+                         ┌──────────────────┐
+                         │ Review Workflow  │
+                         │ draft/approved/  │
+                         │ rejected         │
+                         └────────┬─────────┘
+                                  │
+                           approved only
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │    Scheduler     │
+                         │ Job Store/Worker │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │ Publisher Layer  │
+                         └────────┬─────────┘
+                                  │
+                   ┌──────────────┼──────────────┐
+                   ▼              ▼              ▼
+              ┌─────────┐   ┌─────────┐   ┌────────────┐
+              │ Discord │   │ Mock X  │   │    Mock    │
+              │  Real   │   │         │   │  LinkedIn  │
+              └─────────┘   └─────────┘   └────────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │ Publish History  │
+                         │ Results/Errors   │
+                         └──────────────────┘
 ```
 
-### URL input
+### Core components
 
-When the source type is `url`, the system receives a URL and attempts to retrieve its content.
-
-If fetching fails, the system returns an error and asks the user to provide a valid URL or Markdown content again. The system should not silently create a variant from incomplete or failed source data.
-
-### Markdown input
-
-When the source type is `markdown`, the supplied Markdown content is used directly as the source content.
-
-The stored post therefore represents the normalized source material regardless of how it originally entered the system.
+| Component          | Responsibility                               |
+| ------------------ | -------------------------------------------- |
+| FastAPI            | HTTP API                                     |
+| SQLite             | Persistent application storage               |
+| Ingestion service  | URL/Markdown source handling                 |
+| Generation service | Ollama-powered variant generation            |
+| Variant workflow   | Draft, approval, rejection, publishing state |
+| Scheduler          | Stores and processes scheduled jobs          |
+| Worker             | Publishes due variants                       |
+| Publisher layer    | Platform-independent publishing interface    |
+| Discord adapter    | Real publishing integration                  |
+| Mock adapters      | Safe testing integrations                    |
+| Publish history    | Persistent publishing audit trail            |
 
 ---
 
-## 4. Data Model
+## Workflow
+
+```text
+URL / Markdown
+      │
+      ▼
+Store Post
+      │
+      ▼
+Generate Variants
+      │
+      ▼
+    draft
+    /   \
+   ▼     ▼
+approved rejected
+   │
+   ▼
+schedule
+   │
+   ▼
+worker
+   │
+   ▼
+publish
+   │
+   ▼
+published
+   │
+   ▼
+publish history
+```
+
+Only **approved** variants can be scheduled or published.
+
+Publishing does not modify the original source post.
+
+---
+
+## Data Model
 
 ### Post
 
-The `Post` entity represents the original source content.
+Stores the original source material.
 
 ```text
 Post
 ├── id
 ├── source_url
 ├── content
-├── created_at
-└── source_type
+├── source_type
+└── created_at
 ```
 
-`source_type` identifies whether the source was supplied as a URL or Markdown.
+`source_type` is either:
 
-The original `content` is retained so that generated variants can always be traced back to the exact source material used.
-
----
+```text
+url
+markdown
+```
 
 ### Variant
 
-A `Variant` represents platform-specific generated content derived from a `Post`.
+Stores a generated platform-specific version.
 
 ```text
 Variant
@@ -100,27 +180,14 @@ Variant
 └── created_at
 ```
 
-The relationship is:
+Supported generated platforms:
 
-```text
-Post 1 ──────── * Variant
-```
-
-For example, one source post could produce:
-
-```text
-Post
- ├── LinkedIn Variant
- └── Instagram Variant
-```
-
-The initial generation targets are **LinkedIn and Instagram**.
-
----
+* LinkedIn
+* Instagram
 
 ### Schedule
 
-Scheduling is stored independently from the variant itself.
+Stores when an approved variant should be published.
 
 ```text
 Schedule
@@ -128,179 +195,497 @@ Schedule
 ├── variant_id
 ├── platform
 ├── scheduled_at
-└── idempotency_key
+├── idempotency_key
+├── status
+└── attempted_at
 ```
 
-The `idempotency_key` is used to help prevent the same scheduled publication from being executed more than once.
+### Publish History
 
-A schedule belongs to a specific variant and therefore preserves the connection between the approved content and its intended publication time.
-
----
-
-### PublishHistory
-
-Every publishing attempt is recorded separately.
+Stores the outcome of publishing attempts.
 
 ```text
 PublishHistory
 ├── id
 ├── variant_id
 ├── platform
-├── attempted_at
+├── idempotency_key
 ├── result
-└── error_message
+├── error_message
+└── created_at
 ```
-
-This provides an audit trail of publishing attempts, including successful and unsuccessful attempts.
 
 ---
 
-## 5. Variant State Management
+## AI Generation
 
-Variants follow an explicit state machine:
+The generation service uses:
 
 ```text
-                 ┌───────────┐
-                 │   draft   │
-                 └─────┬─────┘
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-        ┌───────────┐     ┌──────────┐
-        │ approved  │     │ rejected │
-        └─────┬─────┘     └──────────┘
-              │
-              ▼
-        ┌───────────┐
-        │ published │
-        └───────────┘
+Ollama
+└── llama3.2:latest
 ```
 
-A draft can be reviewed and either approved or rejected.
+The generator reads the **stored source post** rather than directly regenerating from the original request.
 
-An approved variant may then be scheduled for publication.
+It produces:
 
-Once approved, the variant's content is immutable. This prevents an approved version from being changed after review.
+```text
+Stored Post
+     │
+     ▼
+Ollama
+     │
+     ├── LinkedIn Variant
+     └── Instagram Variant
+```
 
-Publishing does not replace the variant content; instead, the publishing attempt is recorded in `PublishHistory`.
+### Platform constraints
+
+**LinkedIn**
+
+* 150–3000 characters
+* Maximum 5 hashtags
+* Professional, natural style
+
+**Instagram**
+
+* Up to 2200 characters
+* Maximum 10 hashtags
+* More conversational and engaging style
+
+Length and hashtag limits are validated in application code rather than being left entirely to the LLM.
 
 ---
 
-## 6. Platform Adapter Architecture
+## Review Workflow
 
-Publishing is separated from the core application through platform adapters.
-
-The architecture supports:
+Variants begin as:
 
 ```text
-                Publishing Service
+draft
+```
+
+They can then be moved through the review workflow:
+
+```text
+draft ──► approved ──► published
+   │
+   └────► rejected
+```
+
+Only approved variants can be scheduled.
+
+An attempt to schedule an unapproved variant is rejected by the API.
+
+Approved content is treated as immutable so that the content reviewed by the user remains the content that is scheduled and published.
+
+---
+
+## Scheduling
+
+The scheduler uses a persistent SQLite job store.
+
+A schedule contains:
+
+* Variant ID
+* Platform
+* Scheduled time
+* Idempotency key
+* Processing status
+* Attempt timestamp
+
+The worker:
+
+1. Finds due jobs.
+2. Marks a job as being processed.
+3. Publishes the associated variant.
+4. Records the publishing result.
+5. Marks the schedule as completed.
+
+On restart, jobs left in a processing state can be recovered and returned to the pending queue.
+
+---
+
+## Idempotent Publishing
+
+Each scheduled publication receives an idempotency key:
+
+```text
+variant-{variant_id}:slot-{scheduled_time}
+```
+
+Before publishing, the publisher checks whether that key already has a successful publish-history record.
+
+If it does, the publication is not sent again.
+
+This protects against duplicate publication when:
+
+* a worker restarts,
+* a job is retried,
+* the publishing process is invoked more than once.
+
+---
+
+## Publisher Architecture
+
+Publishing uses a common `SocialPublisher` interface.
+
+```text
+                 SocialPublisher
                        │
           ┌────────────┼────────────┐
           ▼            ▼            ▼
-      Discord        MockX    MockLinkedIn
-       Adapter       Adapter     Adapter
+      Discord       Mock X      Mock LinkedIn
+       Adapter       Adapter        Adapter
 ```
 
-The real implementation for Phase 1 is the **Discord adapter**.
+### Discord
 
-`MockX` and `MockLinkedIn` provide simulated platform integrations for development and testing without requiring live platform APIs.
+Discord is the real platform integration used by the project.
 
-This adapter-based approach means that platform-specific publishing logic does not need to be embedded directly into the core workflow.
+The webhook URL is loaded from an environment variable.
+
+### Mock adapters
+
+Mock X and Mock LinkedIn provide platform implementations without requiring external platform credentials.
+
+The core publishing service works with the common adapter interface rather than containing platform-specific publishing logic.
 
 ---
 
-## 7. LLM Generation
+## Publish History
 
-Gemini is responsible for transforming the original source content into platform-specific variants.
+Every publishing attempt is persisted.
 
-The generation process uses the stored `Post` as the source and produces separate `Variant` records for the requested platforms.
-
-For example:
+Successful attempts contain:
 
 ```text
-Original Post
-      │
-      ▼
-    Gemini
-      │
-      ├── LinkedIn content → LinkedIn Variant
-      │
-      └── Instagram content → Instagram Variant
+result = success
 ```
 
-The generated content is stored rather than generated dynamically every time it is requested. This allows the generated version to be reviewed, approved, scheduled, and published as a specific artifact.
-
----
-
-## 8. Separation of Responsibilities
-
-The system is intentionally divided into distinct responsibilities:
-
-| Component          | Responsibility                  |
-| ------------------ | ------------------------------- |
-| FastAPI            | HTTP/API layer                  |
-| Post service       | Source content management       |
-| Generation service | Gemini-based variant generation |
-| Variant workflow   | Draft, approval and rejection   |
-| Scheduler          | Managing scheduled publications |
-| Platform adapters  | Platform-specific publishing    |
-| Publish history    | Recording publication attempts  |
-| SQLite             | Persistent storage              |
-
-This separation keeps content generation independent from publishing.
-
-For example, generating a LinkedIn variant should not require the LinkedIn publishing adapter to be available.
-
----
-
-## 9. Error Handling
-
-The system should explicitly handle failures at each stage.
-
-For source retrieval:
+Failed attempts contain:
 
 ```text
-URL → Fetch → Success → Store content
-             │
-             └── Failure → Return error + request URL/Markdown again
+result = failed
+error_message = <failure details>
 ```
 
-For publishing, a failed attempt should not erase the variant or schedule. Instead, the failure should be recorded in `PublishHistory`, including an error message where applicable.
+The API exposes the history through:
 
-This makes failures observable and keeps the original generated content intact.
+```text
+GET /publish-history
+```
+
+This provides an audit trail for publishing activity.
 
 ---
 
-## 10. Design Principles
+## API Endpoints
 
-The Phase 1 design follows several core principles:
+### Create a post
 
-1. **Single source of truth** — the original `Post` remains the canonical source content.
-2. **Separation of generated content** — platform-specific content is stored as independent `Variant` records.
-3. **Explicit workflow states** — approval and publishing states are represented rather than inferred.
-4. **Immutable approved content** — approved variants cannot be edited.
-5. **Separation of scheduling and publishing** — scheduling determines when publication should occur; adapters determine how publication happens.
-6. **Platform abstraction** — platform-specific functionality is isolated behind adapters.
-7. **Traceability** — publishing attempts are recorded in `PublishHistory`.
-8. **Testability** — mock adapters allow publishing behaviour to be tested without relying entirely on external platforms.
+```text
+POST /posts
+```
 
-## 11. Phase 1 Scope
+Accepts URL or Markdown source content.
 
-The Phase 1 design establishes the architecture, entities, workflow, input model, platform strategy, and persistence model required for implementation.
+### Approve a variant
 
-The implementation target is:
+```text
+POST /variants/{variant_id}/approve
+```
 
-**Python + FastAPI + SQLite + Gemini + platform adapters**
+### Edit a variant
 
-with:
+```text
+PUT /variants/{variant_id}
+```
 
-* URL and Markdown source input
-* LinkedIn and Instagram variant generation
-* Draft/approval/rejection workflow
-* Immutable approved variants
-* Separate scheduling
-* Discord publishing adapter
-* MockX and MockLinkedIn adapters
-* Publishing history and error tracking
+### Reject a variant
 
-This design provides the foundation for implementing the API and services in the next phase while keeping generation, review, scheduling, and publishing as separate concerns.
+```text
+POST /variants/{variant_id}/reject
+```
+
+### Schedule a variant
+
+```text
+POST /variants/{variant_id}/schedule
+```
+
+Only approved variants can be scheduled.
+
+### Publish a variant
+
+```text
+POST /variants/{variant_id}/publish
+```
+
+### View publishing history
+
+```text
+GET /publish-history
+```
+
+Interactive API documentation is available through FastAPI/Swagger when the server is running:
+
+```text
+/docs
+```
+
+---
+
+## Project Structure
+
+```text
+social-media-studio/
+│
+├── app/
+│   ├── main.py
+│   │
+│   └── services/
+│       ├── database.py
+│       ├── generator.py
+│       ├── ingestion.py
+│       ├── pipeline.py
+│       ├── publisher.py
+│       ├── schedule.py
+│       ├── worker.py
+│       │
+│       └── adapters/
+│           ├── base.py
+│           ├── discord.py
+│           ├── mock_linkedin.py
+│           └── mock_x.py
+│
+├── tests/
+│   ├── test_phase4.py
+│   ├── test_phase5_worker.py
+│   └── discord_test_phase4.py
+│
+├── .env.example
+├── .gitignore
+├── requirements.txt
+├── README.md
+├── EVIDENCE.md
+└── content_repurposer.db
+```
+
+---
+
+## Setup
+
+### 1. Clone the repository
+
+```powershell
+git clone <repository-url>
+cd social-media-studio
+```
+
+### 2. Create a virtual environment
+
+```powershell
+python -m venv .venv
+```
+
+### 3. Activate it
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+### 4. Install dependencies
+
+```powershell
+pip install -r requirements.txt
+```
+
+### 5. Configure environment variables
+
+Create `.env` from `.env.example`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Configure the required Discord webhook:
+
+```text
+DISCORD_WEBHOOK_URL=<your-discord-webhook>
+```
+
+Secrets are loaded from environment variables and are not stored in application source code.
+
+### 6. Initialize the database
+
+```powershell
+python -c "from app.services.database import init_db; init_db(); print('Database ready.')"
+```
+
+### 7. Start the API
+
+```powershell
+uvicorn app.main:app --reload
+```
+
+Open the interactive API documentation at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+---
+
+## Ollama Setup
+
+The application expects Ollama to be running locally with:
+
+```text
+llama3.2:latest
+```
+
+Verify the model is available:
+
+```powershell
+ollama list
+```
+
+If required, pull it with:
+
+```powershell
+ollama pull llama3.2:latest
+```
+
+Start Ollama before using the generation workflow.
+
+---
+
+## Running Tests
+
+Run the complete test suite:
+
+```powershell
+pytest -q
+```
+
+The Phase 5 implementation has been verified with:
+
+```text
+9 passed, 13 warnings
+```
+
+The warnings are SQLite/Python datetime adapter deprecation warnings and do not represent test failures.
+
+The test suite covers the Phase 4 publishing behaviour and Phase 5 worker/scheduling behaviour.
+
+---
+
+## Real Discord Integration Test
+
+The project includes a separate Discord integration test.
+
+Because this sends a real message to Discord, it should not be run as part of every test-suite execution.
+
+Use it only when verifying the live Discord webhook configuration.
+
+---
+
+## Security and Secrets
+
+Secrets are supplied through environment variables.
+
+The repository should contain:
+
+```text
+.env.example
+```
+
+but should not contain the real:
+
+```text
+.env
+```
+
+The Discord webhook URL must never be committed to source control.
+
+---
+
+## Reliability
+
+The Phase 5 scheduler is designed to survive worker restarts.
+
+The scheduler persists job state in SQLite rather than keeping scheduled jobs only in memory.
+
+If a worker stops while processing jobs, processing jobs can be recovered on restart.
+
+Idempotency checks prevent a previously successful publication from being sent again for the same variant and scheduled slot.
+
+---
+
+## Evidence
+
+Implementation and test evidence for the Phase 5 requirements is documented separately in:
+
+```text
+EVIDENCE.md
+```
+
+It records:
+
+* ingestion behaviour
+* constraint validation
+* approval gating
+* adapter behaviour
+* idempotent publishing
+* scheduler recovery
+* publish history
+* Discord integration
+* secret handling
+* automated test results
+
+---
+
+## Design Principles
+
+The implementation follows these principles:
+
+1. **Persistent source of truth** — original posts are stored before generation.
+2. **Separated variants** — generated platform content is stored independently.
+3. **Explicit states** — review and publishing states are represented in the database.
+4. **Approval gating** — only approved content enters the scheduling/publishing flow.
+5. **Idempotent publishing** — the same scheduled publication is not successfully published twice.
+6. **Durable scheduling** — scheduler state survives worker restarts.
+7. **Adapter abstraction** — publishing logic is separated from platform-specific implementations.
+8. **Traceability** — publishing attempts are recorded in persistent history.
+9. **Environment-based secrets** — credentials are kept outside source code.
+10. **Automated verification** — core behaviour is covered by pytest.
+
+---
+
+## Phase 5 Status
+
+The implemented system covers the core Phase 5 workflow:
+
+```text
+Ingest
+  ↓
+Store
+  ↓
+Generate
+  ↓
+Review
+  ↓
+Approve
+  ↓
+Schedule
+  ↓
+Worker
+  ↓
+Idempotent Publish
+  ↓
+Publish History
+```
+
+The complete automated test suite currently passes successfully.

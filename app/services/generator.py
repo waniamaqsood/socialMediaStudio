@@ -1,5 +1,6 @@
 import json; import re; from dataclasses import dataclass; import requests
 
+
 @dataclass
 class ConstraintProfile:
     platform: str
@@ -32,10 +33,9 @@ PROFILES = {
     ),
 }
 
+
 OLLAMA_MODEL = "llama3.2:latest"
-
 OLLAMA_URL = "http://localhost:11434/api/generate"
-
 MAX_GENERATION_ATTEMPTS = 3
 
 
@@ -43,6 +43,7 @@ class OllamaGenerationError(Exception):
     """Raised when Ollama cannot generate valid variants."""
 
     pass
+
 
 def clean_markdown(content: str) -> str:
     """Remove basic Markdown formatting."""
@@ -75,6 +76,11 @@ def clean_markdown(content: str) -> str:
     return content.strip()
 
 
+def clean_content(content: str) -> str:
+    """Clean source content before generation."""
+    return clean_markdown(content)
+
+
 def count_hashtags(content: str) -> int:
     return len(
         re.findall(
@@ -82,6 +88,7 @@ def count_hashtags(content: str) -> int:
             content,
         )
     )
+
 
 def validate_content(
     content: str,
@@ -139,50 +146,53 @@ def build_variant(
         errors=errors,
     )
 
-def generate_with_ollama(content: str,) -> list[GeneratedVariant]:
+
+def generate_with_ollama(
+    content: str,
+) -> list[GeneratedVariant]:
 
     base_prompt = f"""
-    You are a social media content repurposing assistant.
+        You are a social media content repurposing assistant.
 
-    Repurpose the following original content into TWO different
-    social media posts.
+        Repurpose the following original content into TWO different
+        social media posts.
 
-    ORIGINAL CONTENT:
-    -----------------
-    {content}
-    -----------------
+        ORIGINAL CONTENT:
+        -----------------
+        {content}
+        -----------------
 
-    Create:
+        Create:
 
-    1. LinkedIn post
-    2. Instagram post
+        1. LinkedIn post
+        2. Instagram post
 
-    Requirements:
+        Requirements:
 
-    LINKEDIN:
-    - Minimum 150 characters.
-    - Maximum 3000 characters.
-    - Maximum 5 hashtags.
-    - Professional but natural.
-    - Do not invent facts that are not present in the original content.
-    - Use paragraphs for readability.
-    - LinkedIn MUST contain no more than 5 hashtags total.
+        LINKEDIN:
+        - Minimum 150 characters.
+        - Maximum 3000 characters.
+        - Maximum 5 hashtags.
+        - Professional but natural.
+        - Do not invent facts that are not present in the original content.
+        - Use paragraphs for readability.
+        - LinkedIn MUST contain no more than 5 hashtags total.
 
-    INSTAGRAM:
-    - Minimum 1 character.
-    - Maximum 2200 characters.
-    - Maximum 10 hashtags.
-    - More conversational and engaging than LinkedIn.
-    - Do not invent facts that are not present in the original content.
-    - Use paragraphs for readability.
-    - Instagram MUST contain no more than 10 hashtags total.
+        INSTAGRAM:
+        - Minimum 1 character.
+        - Maximum 2200 characters.
+        - Maximum 10 hashtags.
+        - More conversational and engaging than LinkedIn.
+        - Do not invent facts that are not present in the original content.
+        - Use paragraphs for readability.
+        - Instagram MUST contain no more than 10 hashtags total.
 
-    Return ONLY valid JSON in exactly this structure:
+        Return ONLY valid JSON in exactly this structure:
 
-    {{
-        "linkedin": "LinkedIn post text",
-        "instagram": "Instagram post text"
-    }}
+        {{
+            "linkedin": "LinkedIn post text",
+            "instagram": "Instagram post text"
+        }}
     """
 
     last_errors = []
@@ -194,16 +204,16 @@ def generate_with_ollama(content: str,) -> list[GeneratedVariant]:
         if last_errors:
             prompt += f"""
 
-    IMPORTANT:
-    Your previous response failed platform validation.
+            IMPORTANT:
+            Your previous response failed platform validation.
 
-    The validation errors were:
+            The validation errors were:
 
-    {chr(10).join(f"- {error}" for error in last_errors)}
+            {chr(10).join(f"- {error}" for error in last_errors)}
 
-    Generate a corrected response that fixes ALL of these problems.
-    Do not repeat the validation errors.
-    """
+            Generate a corrected response that fixes ALL of these problems.
+            Do not repeat the validation errors.
+        """
 
         try:
             response = requests.post(
@@ -294,13 +304,12 @@ def generate_with_ollama(content: str,) -> list[GeneratedVariant]:
         + " | ".join(last_errors)
     )
 
+
 def generate_variants(
     content: str,
 ) -> list[GeneratedVariant]:
 
-    cleaned_content = clean_markdown(
-        content
-    )
+    cleaned_content = clean_content(content)
 
     if not cleaned_content:
         raise OllamaGenerationError(

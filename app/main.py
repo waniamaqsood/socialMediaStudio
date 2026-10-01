@@ -1,4 +1,4 @@
-from datetime import datetime; from typing import Literal; from fastapi import FastAPI, HTTPException; from pydantic import BaseModel, model_validator; from app.services.database import (get_variant, update_variant,);from app.services.ingestion import fetch_and_extract; from app.services.pipeline import process_post; from app.services.schedule import (SchedulingError, schedule_variant,); from app.services.publisher import (PublishingErrorpublish_variant,)
+from datetime import datetime; from typing import Literal; from fastapi import FastAPI, HTTPException; from pydantic import BaseModel, model_validator; from app.services.database import (get_variant, update_variant,get_publish_history,);from app.services.ingestion import fetch_and_extract; from app.services.pipeline import process_post; from app.services.schedule import (SchedulingError, schedule_variant,); from app.services.publisher import (PublishingError,publish_variant,)
 
 
 app = FastAPI(
@@ -232,3 +232,16 @@ def publish_variant_endpoint(
             status_code=409,
             detail=message,
         )
+
+@app.get("/publish-history")
+def publish_history(limit: int = 100):
+    if limit < 1 or limit > 500:
+        raise HTTPException(
+            status_code=400,
+            detail="limit must be between 1 and 500.",
+        )
+
+    return {
+        "count": len(get_publish_history(limit=limit)),
+        "history": get_publish_history(limit=limit),
+    }

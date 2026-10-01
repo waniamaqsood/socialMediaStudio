@@ -1,7 +1,11 @@
-from pathlib import Path; import sqlite3; from datetime import datetime
+from pathlib import Path
+import sqlite3
+from datetime import datetime
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DB_PATH = BASE_DIR / "content_repurposer.db"
+
 
 def get_connection():
     connection = sqlite3.connect(
@@ -10,6 +14,7 @@ def get_connection():
     )
     connection.row_factory = sqlite3.Row
     return connection
+
 
 def init_db():
     connection = get_connection()
@@ -51,10 +56,36 @@ def init_db():
                 platform TEXT NOT NULL,
                 scheduled_at TIMESTAMP NOT NULL,
                 idempotency_key TEXT UNIQUE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempted_at TIMESTAMP,
                 FOREIGN KEY (variant_id) REFERENCES variants(id)
             )
             """
         )
+
+        # Migrate existing databases created before Phase 5.
+        existing_columns = {
+            row[1]
+            for row in cursor.execute(
+                "PRAGMA table_info(schedules)"
+            ).fetchall()
+        }
+
+        if "status" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE schedules
+                ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'
+                """
+            )
+
+        if "attempted_at" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE schedules
+                ADD COLUMN attempted_at TIMESTAMP
+                """
+            )
 
         cursor.execute(
             """
@@ -76,7 +107,12 @@ def init_db():
     finally:
         connection.close()
 
-def create_post(content: str, source_type: str, source_url: str | None = None,) -> int:
+
+def create_post(
+    content: str,
+    source_type: str,
+    source_url: str | None = None,
+) -> int:
     connection = get_connection()
 
     try:
@@ -107,27 +143,36 @@ def create_post(content: str, source_type: str, source_url: str | None = None,) 
     finally:
         connection.close()
 
+
 def get_post(post_id: int):
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT *
-        FROM posts
-        WHERE id = ?
-        """,
-        (post_id,),
-    )
+    try:
+        cursor = connection.cursor()
 
-    post = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT *
+            FROM posts
+            WHERE id = ?
+            """,
+            (post_id,),
+        )
 
-    connection.close()
+        post = cursor.fetchone()
 
-    return dict(post) if post else None
+        return dict(post) if post else None
+
+    finally:
+        connection.close()
 
 
-def create_variant(post_id: int, platform: str, content: str, status: str = "draft",) -> int:
+def create_variant(
+    post_id: int,
+    platform: str,
+    content: str,
+    status: str = "draft",
+) -> int:
     connection = get_connection()
 
     try:
@@ -160,7 +205,35 @@ def create_variant(post_id: int, platform: str, content: str, status: str = "dra
     finally:
         connection.close()
 
-def update_variant(variant_id: int, content: str | None = None, status: str | None = None,):
+
+def get_variant(variant_id: int):
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT *
+            FROM variants
+            WHERE id = ?
+            """,
+            (variant_id,),
+        )
+
+        variant = cursor.fetchone()
+
+        return dict(variant) if variant else None
+
+    finally:
+        connection.close()
+
+
+def update_variant(
+    variant_id: int,
+    content: str | None = None,
+    status: str | None = None,
+):
     connection = get_connection()
 
     try:
@@ -195,66 +268,13 @@ def update_variant(variant_id: int, content: str | None = None, status: str | No
     finally:
         connection.close()
 
-def get_variant(variant_id: int):
-    connection = get_connection()
 
-    try:
-        cursor = connection.cursor()
-
-        cursor.execute(
-            """
-            SELECT *
-            FROM variants
-            WHERE id = ?
-            """,
-            (variant_id,),
-        )
-
-        variant = cursor.fetchone()
-
-        return dict(variant) if variant else None
-
-    finally:
-        connection.close()
-
-def update_variant(
+def create_schedule(
     variant_id: int,
-    content: str | None = None,
-    status: str | None = None,
-):
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    fields = []
-    values = []
-
-    if content is not None:
-        fields.append("content = ?")
-        values.append(content)
-
-    if status is not None:
-        fields.append("status = ?")
-        values.append(status)
-
-    if not fields:
-        connection.close()
-        return
-
-    values.append(variant_id)
-
-    query = f"""
-        UPDATE variants
-        SET {", ".join(fields)}
-        WHERE id = ?
-    """
-
-    cursor.execute(query, values)
-
-    connection.commit()
-    connection.close()
-
-
-def create_schedule(variant_id: int, platform: str, scheduled_at: datetime,idempotency_key: str,) -> int:
+    platform: str,
+    scheduled_at: datetime,
+    idempotency_key: str,
+) -> int:
     connection = get_connection()
 
     try:
@@ -266,15 +286,17 @@ def create_schedule(variant_id: int, platform: str, scheduled_at: datetime,idemp
                 variant_id,
                 platform,
                 scheduled_at,
-                idempotency_key
+                idempotency_key,
+                status
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 variant_id,
                 platform,
                 scheduled_at,
                 idempotency_key,
+                "pending",
             ),
         )
 
@@ -287,125 +309,262 @@ def create_schedule(variant_id: int, platform: str, scheduled_at: datetime,idemp
     finally:
         connection.close()
 
+
 def get_schedule(schedule_id: int):
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT *
-        FROM schedules
-        WHERE id = ?
-        """,
-        (schedule_id,),
-    )
+    try:
+        cursor = connection.cursor()
 
-    schedule = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT *
+            FROM schedules
+            WHERE id = ?
+            """,
+            (schedule_id,),
+        )
 
-    connection.close()
+        schedule = cursor.fetchone()
 
-    return dict(schedule) if schedule else None
+        return dict(schedule) if schedule else None
+
+    finally:
+        connection.close()
 
 
 def get_schedules_for_variant(variant_id: int):
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT *
-        FROM schedules
-        WHERE variant_id = ?
-        ORDER BY id
-        """,
-        (variant_id,),
-    )
+    try:
+        cursor = connection.cursor()
 
-    schedules = cursor.fetchall()
-
-    connection.close()
-
-    return [dict(schedule) for schedule in schedules]
-
-
-def get_schedule_by_variant(
-    variant_id: int,
-):
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM schedules
-        WHERE variant_id = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (variant_id,),
-    )
-
-    schedule = cursor.fetchone()
-
-    connection.close()
-
-    return dict(schedule) if schedule else None
-
-
-def create_publish_history(variant_id: int, platform: str, idempotency_key: str, result: str, error_message: str | None = None,) -> int:
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    cursor.execute(
-        """
-        INSERT INTO publish_history (
-            variant_id,
-            platform,
-            idempotency_key,
-            result,
-            error_message
+        cursor.execute(
+            """
+            SELECT *
+            FROM schedules
+            WHERE variant_id = ?
+            ORDER BY id
+            """,
+            (variant_id,),
         )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            variant_id,
-            platform,
-            idempotency_key,
-            result,
-            error_message,
-        ),
-    )
 
-    history_id = cursor.lastrowid
+        schedules = cursor.fetchall()
 
-    connection.commit()
-    connection.close()
+        return [dict(schedule) for schedule in schedules]
 
-    return history_id
+    finally:
+        connection.close()
 
 
-def get_publish_history_by_key(
-    idempotency_key: str,
-):
+def get_schedule_by_variant(variant_id: int):
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT *
-        FROM publish_history
-        WHERE idempotency_key = ?
-        AND result = 'success'
-        LIMIT 1
-        """,
-        (idempotency_key,),
-    )
+    try:
+        cursor = connection.cursor()
 
-    history = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT *
+            FROM schedules
+            WHERE variant_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (variant_id,),
+        )
 
-    connection.close()
+        schedule = cursor.fetchone()
 
-    return dict(history) if history else None
+        return dict(schedule) if schedule else None
+
+    finally:
+        connection.close()
+
+
+def create_publish_history(
+    variant_id: int,
+    platform: str,
+    idempotency_key: str,
+    result: str,
+    error_message: str | None = None,
+) -> int:
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO publish_history (
+                variant_id,
+                platform,
+                idempotency_key,
+                result,
+                error_message
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                variant_id,
+                platform,
+                idempotency_key,
+                result,
+                error_message,
+            ),
+        )
+
+        history_id = cursor.lastrowid
+
+        connection.commit()
+
+        return history_id
+
+    finally:
+        connection.close()
+
+
+def get_publish_history_by_key(idempotency_key: str):
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT *
+            FROM publish_history
+            WHERE idempotency_key = ?
+            AND result = 'success'
+            LIMIT 1
+            """,
+            (idempotency_key,),
+        )
+
+        history = cursor.fetchone()
+
+        return dict(history) if history else None
+
+    finally:
+        connection.close()
+
+def get_publish_history(limit: int = 100) -> list[dict]:
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                variant_id,
+                platform,
+                idempotency_key,
+                result,
+                error_message,
+                created_at
+            FROM publish_history
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+
+        return [dict(row) for row in cursor.fetchall()]
+
+    finally:
+        connection.close()
+
+
+def get_due_schedules(limit: int = 10):
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT *
+            FROM schedules
+            WHERE scheduled_at <= ?
+            AND COALESCE(status, 'pending') = 'pending'
+            ORDER BY scheduled_at, id
+            LIMIT ?
+            """,
+            (
+                datetime.now().astimezone(),
+                limit,
+            ),
+        )
+
+        rows = cursor.fetchall()
+
+        return [dict(row) for row in rows]
+
+    finally:
+        connection.close()
+
+
+def mark_schedule_attempted(schedule_id: int):
+    connection = get_connection()
+
+    try:
+        connection.execute(
+            """
+            UPDATE schedules
+            SET status = 'processing',
+                attempted_at = ?
+            WHERE id = ?
+            AND COALESCE(status, 'pending') = 'pending'
+            """,
+            (
+                datetime.now().astimezone(),
+                schedule_id,
+            ),
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()
+
+
+def mark_schedule_completed(schedule_id: int):
+    connection = get_connection()
+
+    try:
+        connection.execute(
+            """
+            UPDATE schedules
+            SET status = 'completed'
+            WHERE id = ?
+            """,
+            (schedule_id,),
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()
+
+
+def reset_processing_schedules():
+    connection = get_connection()
+
+    try:
+        connection.execute(
+            """
+            UPDATE schedules
+            SET status = 'pending'
+            WHERE status = 'processing'
+            """
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()
 
 
 if __name__ == "__main__":
