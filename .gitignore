@@ -1,4 +1,12 @@
+# Secrets
 .env
+
+# Python
 __pycache__/
 *.pyc
-content_repurposer.db
+venv/
+.venv/
+.pytest_cache/
+
+# Local database (created by init_db on first run)
+*.db
