@@ -1,4 +1,4 @@
-from datetime import datetime; from typing import Literal; from fastapi import FastAPI, HTTPException; from pydantic import BaseModel, model_validator; from app.services.database import (get_variant, update_variant,get_publish_history,);from app.services.ingestion import fetch_and_extract; from app.services.pipeline import process_post; from app.services.schedule import (SchedulingError, schedule_variant,); from app.services.publisher import (PublishingError,publish_variant,)
+from datetime import datetime; from typing import Literal; from fastapi import FastAPI, HTTPException; from pydantic import BaseModel, model_validator; from app.services.database import (get_variant, update_variant,get_publish_history,);from app.services.ingestion import fetch_and_extract; from app.services.pipeline import process_post; from app.services.schedule import (SchedulingError, schedule_variant,); from app.services.publisher import PublishingError, publish_variant
 
 
 app = FastAPI(

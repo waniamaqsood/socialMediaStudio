@@ -5,7 +5,7 @@ from app.services.database import (
 )
 
 from app.services.generator import (
-    clean_content,
+    clean_markdown,
     generate_variants,
 )
 
@@ -23,7 +23,7 @@ def process_post(
     init_db()
 
     # 2. Clean source content
-    cleaned_content = clean_content(content)
+    cleaned_content = clean_markdown(content)
 
     # 3. Store original post
     post_id = create_post(
