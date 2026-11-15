@@ -1,6 +1,6 @@
 from pathlib import Path
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -493,7 +493,7 @@ def get_due_schedules(limit: int = 10):
             LIMIT ?
             """,
             (
-                datetime.now().astimezone(),
+                datetime.now(timezone.utc),
                 limit,
             ),
         )

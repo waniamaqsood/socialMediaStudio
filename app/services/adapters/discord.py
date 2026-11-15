@@ -28,10 +28,14 @@ class DiscordPublisher(SocialPublisher):
             response.raise_for_status()
 
         except requests.exceptions.RequestException as error:
+            status = getattr(error.response, "status_code", None)
+            detail = f"{type(error).__name__}"
+            if status is not None:
+                detail += f" (HTTP {status})"
             return PublishResult(
                 success=False,
                 platform=self.platform,
-                error_message=str(error),
+                error_message=detail,
             )
 
         return PublishResult(

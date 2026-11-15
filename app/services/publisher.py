@@ -9,41 +9,49 @@ class PublishingError(Exception):
         self.message = message
         super().__init__(message)
 
+ADAPTERS = {
+    "discord": DiscordPublisher,
+    "mock_x": MockXPublisher,
+    "mock_linkedin": MockLinkedInPublisher,
+}
 
-def get_publishers() -> dict[str, SocialPublisher]:
+DEFAULT_ADAPTER = {
+    "discord": "discord",
+    "x": "mock_x",
+    "linkedin": "mock_linkedin",
+}
+
+
+def get_publisher(platform: str) -> SocialPublisher:
     """
-    Return platform adapters selected through environment configuration.
+    Build ONLY the adapter for this platform.
 
-    Each platform can be mapped to a different adapter without
-    changing the publishing business logic.
+    The adapter can be changed with an environment variable, for example
+    PUBLISHER_LINKEDIN=mock_linkedin, without touching the publish logic.
     """
     import os
 
-    adapter_map = {
-        "discord": DiscordPublisher,
-        "mock_x": MockXPublisher,
-        "mock_linkedin": MockLinkedInPublisher,
-    }
-
-    publishers = {}
-
-    for platform in ("discord", "x", "linkedin"):
-        configured_adapter = os.getenv(
-            f"PUBLISHER_{platform.upper()}",
-            platform if platform == "discord" else f"mock_{platform}",
+    if platform not in DEFAULT_ADAPTER:
+        raise PublishingError(
+            f"No publisher is configured for platform '{platform}'."
         )
 
-        adapter_class = adapter_map.get(configured_adapter)
+    name = os.getenv(
+        f"PUBLISHER_{platform.upper()}",
+        DEFAULT_ADAPTER[platform],
+    )
 
-        if adapter_class is None:
-            raise PublishingError(
-                f"Unknown adapter '{configured_adapter}' "
-                f"configured for platform '{platform}'."
-            )
+    adapter_class = ADAPTERS.get(name)
 
-        publishers[platform] = adapter_class()
+    if adapter_class is None:
+        raise PublishingError(
+            f"Unknown adapter '{name}' configured for platform '{platform}'."
+        )
 
-    return publishers
+    try:
+        return adapter_class()
+    except RuntimeError as error:  
+        raise PublishingError(str(error)) from error
 
 def publish_variant(
     variant_id: int,
@@ -116,19 +124,9 @@ def publish_variant(
             "status": "already_published",
             "idempotency_key": idempotency_key,
         }
-
-    publishers = get_publishers()
-
     platform = variant["platform"]
 
-    publisher = publishers.get(platform)
-
-    if publisher is None:
-        raise PublishingError(
-            f"No publisher is configured for "
-            f"platform '{platform}'."
-        )
-
+    publisher = get_publisher(platform)
     result: PublishResult = publisher.publish(
         variant["content"]
     )

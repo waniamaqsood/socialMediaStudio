@@ -1,4 +1,4 @@
-from datetime import datetime; from app.services.database import (create_schedule, get_variant,)
+from datetime import datetime, timezone; from app.services.database import (create_schedule, get_variant,)
 
 class SchedulingError(Exception):
     def __init__(self, message: str):
@@ -29,6 +29,9 @@ def schedule_variant(variant_id: int, scheduled_at: datetime,):
             f"Current status is '{variant['status']}'. "
             f"Only approved variants can be scheduled."
         )
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        scheduled_at = scheduled_at.astimezone(timezone.utc)
 
     idempotency_key = build_idempotency_key(
         variant_id=variant_id,

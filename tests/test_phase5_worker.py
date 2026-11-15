@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone; from app.services.database import (create_post, create_variant,get_connection, get_publish_history_by_key,); from app.services.schedule import schedule_variant; from app.services.worker import SchedulerWorker
+from datetime import datetime, timedelta, timezone; from app.services.database import (create_post, create_variant,get_connection, get_publish_history_by_key,); from app.services.schedule import schedule_variant; from app.services.worker import SchedulerWorker; import pytest
 
 def create_approved_discord_variant(content: str) -> int:
     post_id = create_post(
@@ -32,7 +32,7 @@ def create_approved_discord_variant(content: str) -> int:
 
     return variant_id
 
-
+@pytest.mark.integration
 def test_worker_publishes_due_variant():
 
     variant_id = create_approved_discord_variant(
@@ -65,7 +65,7 @@ def test_worker_publishes_due_variant():
 
     assert result["status"] == "published"
 
-
+@pytest.mark.integration
 def test_worker_restart_does_not_duplicate_publish():
 
     variant_id = create_approved_discord_variant(
