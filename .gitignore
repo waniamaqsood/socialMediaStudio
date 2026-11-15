@@ -10,3 +10,7 @@ venv/
 
 # Local database (created by init_db on first run)
 *.db
+
+brag-output/
+.agents/
+skills-lock.json
