@@ -5,13 +5,15 @@
 The complete automated test suite passes:
 
 ```text
-9 passed, 13 warnings
+10 passed, 2 deselected, 10 warnings
 ```
+
+The 2 deselected tests are the real-Discord integration tests, which post a live message and run only with `pytest -m integration`. They were run earlier and passed (see sections 6 and 8 below).
 
 Command:
 
 ```powershell
-pytest -q
+pytest
 ```
 
 The warnings are SQLite datetime adapter deprecation warnings and do not cause test failures.
@@ -46,14 +48,14 @@ Platform constraints are enforced in Python code rather than relying only on the
 * Minimum: 150 characters
 * Maximum: 3000 characters
 * Maximum: 5 hashtags
-* Professional/natural tone
+* Professional/natural tone (requested in the prompt, not validated in code)
 
 ### Instagram
 
 * Minimum: 1 character
 * Maximum: 2200 characters
 * Maximum: 10 hashtags
-* More conversational/engaging tone
+* More conversational/engaging tone (requested in the prompt, not validated in code)
 
 Validation is performed by `validate_content()` in:
 
@@ -237,7 +239,7 @@ platform
 idempotency_key
 result
 error_message
-created_at
+attempted_at
 ```
 
 History is exposed through:
@@ -295,13 +297,13 @@ Secrets are not hard-coded into the application source.
 Command:
 
 ```powershell
-pytest -q
+pytest
 ```
 
 Final result:
 
 ```text
-9 passed, 13 warnings
+10 passed, 2 deselected, 10 warnings
 ```
 
 This covers the Phase 4 publishing requirements and Phase 5 worker/scheduling requirements.
